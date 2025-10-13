@@ -35,9 +35,7 @@ export default function Sidebar() {
           );
         })}
       </nav>
-      <div className="mt-auto p-3 text-xs text-white/50">
-        <div className="badge">MVP</div>
-      </div>
+
     </aside>
   );
 }

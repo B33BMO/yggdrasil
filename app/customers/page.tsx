@@ -1,16 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import type { Customer, Policy, Device } from "@/lib/types";
 import Modal from "@/components/Modal";
+import AssignPoliciesModal from "@/components/AssignPoliciesModal";
 
 export default function CustomersPage() {
   const [items, setItems] = useState<Customer[]>([]);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
 
-  const [open, setOpen] = useState(false);
+  const [openCreate, setOpenCreate] = useState(false);
   const [name, setName] = useState("");
+
+  // Assign Policies modal
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [activeCustomerId, setActiveCustomerId] = useState<string | null>(null);
 
   async function load() {
     const [c, p, d] = await Promise.all([
@@ -33,17 +38,7 @@ export default function CustomersPage() {
       body: JSON.stringify({ name: trimmed }),
     });
     setName("");
-    setOpen(false);
-    load();
-  }
-
-  async function togglePolicy(c: Customer, policyId: string) {
-    const assigned = c.policyIds.includes(policyId);
-    await fetch(`/api/customers/${c.id}/policies`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ policyId, action: assigned ? "remove" : "add" }),
-    });
+    setOpenCreate(false);
     load();
   }
 
@@ -52,11 +47,16 @@ export default function CustomersPage() {
     load();
   }
 
+  const policyName = useMemo(() => {
+    const map = new Map(policies.map(p => [p.id, p.name]));
+    return (id: string) => map.get(id) ?? id;
+  }, [policies]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Customers</h1>
-        <button className="btn" onClick={() => setOpen(true)}>Add Customer</button>
+        <button className="btn" onClick={() => setOpenCreate(true)}>Add Customer</button>
       </div>
 
       <div className="card">
@@ -67,24 +67,23 @@ export default function CustomersPage() {
               <li key={c.id} className="py-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="font-medium">{c.name}</div>
-                  <button className="btn" onClick={() => remove(c.id)}>Delete</button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="btn"
+                      onClick={() => { setActiveCustomerId(c.id); setAssignOpen(true); }}
+                    >
+                      Assign Policies
+                    </button>
+                    <button className="btn" onClick={() => remove(c.id)}>Delete</button>
+                  </div>
                 </div>
 
                 <div className="text-xs opacity-70">Assigned Policies</div>
                 <div className="flex flex-wrap gap-2">
-                  {policies.map((p) => {
-                    const on = c.policyIds.includes(p.id);
-                    return (
-                      <button
-                        key={p.id}
-                        className={`badge ${on ? "bg-white/25" : "bg-white/10"} hover:bg-white/20`}
-                        onClick={() => togglePolicy(c, p.id)}
-                        title={on ? "Click to unassign" : "Click to assign"}
-                      >
-                        {p.name}
-                      </button>
-                    );
-                  })}
+                  {c.policyIds.length === 0 && <span className="badge">None</span>}
+                  {c.policyIds.map(pid => (
+                    <span key={pid} className="badge">{policyName(pid)}</span>
+                  ))}
                 </div>
 
                 <div className="text-xs opacity-70 mt-2">Devices ({devs.length})</div>
@@ -100,13 +99,14 @@ export default function CustomersPage() {
         </ul>
       </div>
 
+      {/* Add Customer modal */}
       <Modal
-        open={open}
-        onClose={() => setOpen(false)}
+        open={openCreate}
+        onClose={() => setOpenCreate(false)}
         title="Add Customer"
         footer={
           <>
-            <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
+            <button className="btn" onClick={() => setOpenCreate(false)}>Cancel</button>
             <button className="btn" onClick={create}>Create</button>
           </>
         }
@@ -119,6 +119,16 @@ export default function CustomersPage() {
           autoFocus
         />
       </Modal>
+
+      {/* Assign Policies modal */}
+      <AssignPoliciesModal
+        open={assignOpen}
+        onClose={() => setAssignOpen(false)}
+        customerId={activeCustomerId}
+        onSaved={async () => {
+          await load(); // refresh customers & devices to reflect new assignments
+        }}
+      />
     </div>
   );
 }
