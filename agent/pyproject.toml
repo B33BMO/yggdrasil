@@ -1,0 +1,16 @@
+[project]
+name = "lpp-agent"
+version = "0.2.0"
+description = "Linux Policy Platform Agent"
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.32.3",
+  "pyyaml>=6.0.2",
+  "tomli>=2.0.1",
+]
+
+[project.scripts]
+lpp-agent = "lpp_agent.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]

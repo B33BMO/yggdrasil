@@ -1,0 +1,2 @@
+[console_scripts]
+lpp-agent = lpp_agent.main:cli
