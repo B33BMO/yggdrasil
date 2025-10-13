@@ -1,5 +1,5 @@
 from __future__ import annotations
-import argparse, logging, time
+import argparse, logging, time, random
 from typing import Any
 from .config import load_conf, save_conf, load_state, save_state, setup_logging
 from .util import distro_id, backoff_sleep
@@ -7,6 +7,9 @@ from .http import Api
 from .exec import apply_policy_yaml
 
 log = logging.getLogger(__name__)
+
+def _state_key(api: str, agent_id: str) -> str:
+    return f"{api}::{agent_id}"
 
 def cmd_enroll(token: str, api: str):
     cfg = load_conf()
@@ -22,10 +25,32 @@ def cmd_enroll(token: str, api: str):
     return 0
 
 def run_once(cfg: dict[str, Any]) -> None:
-    a = Api(cfg["api"], cfg.get("jwt"))
-    agent_id = cfg["agent_id"]
-    policies = a.effective_policy(agent_id)
+    """
+    One iteration:
+      - GET effective policy with If-None-Match
+      - If 304: heartbeat only
+      - If 200: apply YAML policies, post results, heartbeat
+      - Persist new ETag so restarts don't re-apply
+    """
+    api = cfg["api"]
+    agent_id = str(cfg["agent_id"])
     allow_bash = bool(cfg.get("allow_bash", True))
+
+    # restore etag from state
+    st = load_state()
+    key = _state_key(api, agent_id)
+    etag = (st.get("etags") or {}).get(key)
+
+    a = Api(api, cfg.get("jwt"))
+    changed, policies, new_etag, rev = a.effective_policy_etag(agent_id, etag)
+
+    if not changed:
+        # No policy change → just heartbeat and return quickly
+        a.heartbeat(agent_id)
+        log.debug("No policy change (etag=%s) — rev=%s", etag, rev)
+        return
+
+    log.info("Policy change detected (rev=%s). Applying %d policies…", rev, len(policies))
 
     all_results: list[dict[str, Any]] = []
     for p in policies:
@@ -35,8 +60,14 @@ def run_once(cfg: dict[str, Any]) -> None:
             r["policy_id"] = p.get("id")
         all_results.extend(res)
 
-    a.post_results({"agent_id": agent_id, "results": all_results})
+    # Ingest + heartbeat
+    a.post_results({"agent_id": agent_id, "results": all_results, "rev": rev})
     a.heartbeat(agent_id)
+
+    # Persist ETag so we won’t re-apply after restart
+    st.setdefault("etags", {})[key] = new_etag
+    save_state(st)
+    log.info("Applied policies. Stored ETag %s", new_etag)
 
 def cmd_run():
     cfg = load_conf(); setup_logging()
@@ -45,16 +76,18 @@ def cmd_run():
         return 2
 
     attempt = 0
+    base_interval = int(cfg.get("interval_sec", 60))
     while True:
         try:
             run_once(cfg)
             attempt = 0
+            # tiny jitter to avoid thundering herd
+            time.sleep(base_interval + random.uniform(0, 5))
         except Exception as e:
             log.error("loop error: %s", e)
             attempt += 1
             backoff_sleep(attempt, cap=int(cfg.get("max_backoff_sec", 600)))
             continue
-        time.sleep(int(cfg.get("interval_sec", 60)))
 
 def cli():
     ap = argparse.ArgumentParser(prog="lpp-agent")

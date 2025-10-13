@@ -12,7 +12,7 @@ STATE_FILE = STATE_DIR/"state.json"
 LOG_FILE = LOG_DIR/"agent.log"
 
 DEFAULTS = {
-    "api": "http://localhost:8080",
+    "api": "http://10.0.203.172:8080",
     "agent_id": None,
     "jwt": None,
     "tenant": 1,

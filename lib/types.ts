@@ -2,10 +2,12 @@ export type Policy = {
   id: string;
   name: string;
   description?: string;
-  version: number;
-  args?: Record<string, any>;
-  pkg?: string;       // NEW: package/app name
-  bash?: string;      // NEW: optional bash snippet
+  version?: number;
+
+  // New (all optional):
+  packageName?: string;               // e.g., "ufw"
+  args?: Record<string, unknown>;     // arbitrary JSON for the plugin
+  bash?: string;                      // optional bash snippet
 };
 
 export type Customer = {

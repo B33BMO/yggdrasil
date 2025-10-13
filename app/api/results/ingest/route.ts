@@ -1,14 +1,19 @@
+export const runtime = "nodejs";
 import { NextResponse } from "next/server";
-import { db } from "../../_store";
+import { db, save } from "../../_store";
 
 export async function POST(req: Request) {
-  const body = await req.json();
-  const agentId = Number(body?.agent_id ?? 0);
-  const deviceId = db.agentMap.get(agentId);
-  if (deviceId) {
-    const d = db.devices.find(x => x.id === deviceId);
-    if (d) d.lastSeen = new Date().toISOString();
+  const body = await req.json().catch(() => ({}));
+  const agentId = String(body?.agent_id ?? "");
+  const deviceId =
+    agentId.startsWith("dev_")
+      ? agentId
+      : (db.agentMap[agentId] ?? db.agentMap[Number(agentId) as any] ?? agentId);
+
+  const dev = db.devices.find(d => String(d.id) === String(deviceId));
+  if (dev) {
+    dev.lastSeen = new Date().toISOString();
+    save();
   }
-  // Optionally stash results for UI later
   return NextResponse.json({ ok: true });
 }

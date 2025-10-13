@@ -1,26 +1,35 @@
+export const runtime = "nodejs";
 import { NextResponse } from "next/server";
-import { db } from "../_store";
+import { db, save } from "../_store";
 
+export async function GET() {
+  return NextResponse.json(db.devices);
+}
 
 export async function POST(req: Request) {
-  const body = await req.json();
+  const body = await req.json().catch(() => ({}));
+  const hostname = (body.hostname ?? "unknown").trim() || "unknown";
+  const distro = (body.distro ?? "linux-unknown").trim() || "linux-unknown";
+  const customerId = body.customerId || undefined;
+
   const id = `dev_${Math.random().toString(36).slice(2,8)}`;
-  const customer = db.customers.find(c => c.id === body.customerId);
-  const policyIds = customer ? [...customer.policyIds] : [];
+  const inherited = customerId
+    ? (db.customers.find(c => c.id === customerId)?.policyIds ?? [])
+    : [];
 
   db.devices.push({
     id,
-    hostname: body.hostname || id,
-    distro: body.distro,                // e.g., "ubuntu-22.04"
-    agentVersion: "0.1.0",
-    customerId: body.customerId,
-    policyIds,
-    lastSeen: new Date().toISOString()
+    hostname,
+    distro,
+    agentVersion: "0.2.0",
+    customerId,
+    policyIds: [...inherited],
+    policyRev: customerId
+      ? (db.customers.find(c => c.id === customerId)?.policyRev ?? 0)
+      : 0,
+    lastSeen: new Date().toISOString(),
   });
 
-  return NextResponse.json(db.devices.at(-1), { status: 201 });
-}
-
-export async function GET() {
-  return NextResponse.json(db.devices.slice().reverse());
+  save(true);
+  return NextResponse.json({ id }, { status: 201 });
 }

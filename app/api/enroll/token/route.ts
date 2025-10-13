@@ -1,13 +1,52 @@
+export const runtime = "nodejs";
 import { NextResponse } from "next/server";
-import { db } from "../../_store";
+import { db, save, nextDeviceId, nextAgentId } from "../../_store";
 
+// POST /api/agents/enroll?token=...&hostname=...&distro=...
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({} as any));
-  const customerId = body?.customerId || db.customers[0]?.id || "";
-  const os = body?.os as string | undefined;
+  const { searchParams } = new URL(req.url);
+  const token = searchParams.get("token") ?? "";
+  const hostname = searchParams.get("hostname") ?? "unknown";
+  const distro = searchParams.get("distro") ?? "linux-unknown";
 
-  const token = `enr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,10)}`;
-  db.tokenIndex.set(token, { token, customerId, os, used: false, createdAt: Date.now() });
+  // Optional: look up token → customer
+  let customerId: string | undefined;
+  const tinfo = db.tokens?.[token];
+  if (tinfo && !tinfo.used) {
+    customerId = tinfo.customerId;
+    tinfo.used = true;
+  }
 
-  return NextResponse.json({ token, customerId, os }, { status: 201 });
+  // Create device
+  const idNum = nextDeviceId();
+  const deviceId = String(idNum);
+  const inherited = customerId
+    ? (db.customers.find(c => c.id === customerId)?.policyIds ?? [])
+    : [];
+
+  db.devices.push({
+    id: deviceId,
+    hostname,
+    customerId,
+    distro,
+    agentVersion: "0.2.0",
+    lastSeen: new Date().toISOString(),
+    policyIds: [...inherited],
+    policyRev: customerId
+      ? (db.customers.find(c => c.id === customerId)?.policyRev ?? 0)
+      : 0,
+  });
+
+  // Issue an agent id and map it to the device
+  const agentIdNum = nextAgentId();
+  const agentId = String(agentIdNum);
+  db.agentMap[agentId] = deviceId;
+
+  save(true);
+
+  return NextResponse.json({
+    agent_id: agentIdNum,
+    device_id: idNum,
+    device_jwt: undefined, // placeholder if you add auth later
+  }, { status: 201 });
 }

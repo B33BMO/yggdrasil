@@ -1,82 +1,87 @@
+export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { db } from "../../../_store";
 
-export async function GET(
-  _req: Request,
-  ctx: { params: Promise<{ id: string }> } // 👈 important: params is a Promise
-) {
-  const { id } = await ctx.params;          // 👈 await it
-  const agentId = Number(id);
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
+  // if caller uses a device id, accept it; otherwise resolve agent -> device
+  const deviceId =
+    id.startsWith("dev_")
+      ? id
+      : (db.agentMap[id] ?? db.agentMap[Number(id) as any] ?? id);
 
-  const deviceId = db.agentMap.get(agentId);
-  if (!deviceId) return NextResponse.json({ agent_id: agentId, policies: [] });
+  const dev = db.devices.find(d => String(d.id) === String(deviceId));
+  if (!dev) {
+    return new NextResponse(JSON.stringify({ agent_id: id, policies: [], rev: 0 }), {
+      status: 200, headers: { "Content-Type": "application/json", ETag: 'W/"rev-0"' }
+    });
+  }
 
-  const dev = db.devices.find(d => d.id === deviceId);
-  if (!dev) return NextResponse.json({ agent_id: agentId, policies: [] });
+  const rev = dev.policyRev ?? (dev.customerId ? (db.customers.find(c => c.id === dev.customerId)?.policyRev ?? 0) : 0);
+  const etag = `W/"rev-${rev}"`;
+  const inm = req.headers.get("if-none-match");
+  if (inm && inm === etag) return new NextResponse(null, { status: 304, headers: { ETag: etag } });
 
   const pols = dev.policyIds
     .map(pid => db.policies.find(p => p.id === pid))
     .filter(Boolean)
-    .map(p => ({
-      id: p!.id,
-      name: p!.name,
-      yaml: toYamlFromMock(p!)
+    .map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description ?? "",
+      yaml: toYamlFromPolicy(p),
+      packageName: p.packageName,
+      args: p.args,
+      bash: p.bash,
     }));
 
-  return NextResponse.json({ agent_id: agentId, policies: pols });
-}
-
-function toYamlFromMock(p: any): string {
-  const rules: any[] = [];
-  if (p.pkg) {
-    rules.push({ id: `pkg-${p.pkg}`, type: "pkg.ensure", name: p.pkg, state: p.args?.state ?? "present" });
-  }
-  if (p.args?.PermitRootLogin !== undefined) {
-    rules.push({
-      id: "sshd-disable-root",
-      type: "file.replace_kv",
-      file: "/etc/ssh/sshd_config",
-      key: "PermitRootLogin",
-      value: String(p.args.PermitRootLogin)
-    });
-  }
-  if (Array.isArray(p.args?.presentLines) && p.args.presentLines.length) {
-    rules.push({ id: "ensure-lines", type: "file.ensure_lines", file: "/etc/some.conf", present: p.args.presentLines });
-  }
-  if (Array.isArray(p.args?.allow) && p.args.allow.length) {
-    rules.push({ id: "ufw-allow", type: "bash", code: `ufw allow ${p.args.allow.join(" ")}` });
-    rules.push({ id: "ufw-enable", type: "bash", code: "ufw --force enable" });
-  }
-  if (p.bash) rules.push({ id: "custom-bash", type: "bash", code: p.bash });
-
-  const header = [
-    "policy:",
-    `  id: ${p.id}`,
-    `  name: ${p.name}`,
-    `  version: ${p.version ?? 1}`,
-    "",
-    "rules:",
-  ];
-  const body = rules.flatMap((r) => toYamlLines(r).map(l => `  - ${l}`));
-  return [...header, ...body, ""].join("\n");
-}
-
-function toYamlLines(obj: Record<string, any>): string[] {
-  const lines: string[] = [];
-  const entries = Object.entries(obj);
-  entries.forEach(([k, v], i) => {
-    const key = i === 0 ? k : `    ${k}`;
-    lines.push(`${key}: ${formatYaml(v)}`);
+  return new NextResponse(JSON.stringify({ agent_id: id, policies: pols, rev }), {
+    status: 200, headers: { "Content-Type": "application/json", ETag: etag }
   });
-  return lines;
 }
 
-function formatYaml(v: any): string {
-  if (typeof v === "string") return JSON.stringify(v);
-  if (Array.isArray(v)) return `[${v.map(formatYaml).join(", ")}]`;
-  if (typeof v === "object" && v !== null) {
-    const inner = Object.entries(v).map(([k, val]) => `${k}: ${formatYaml(val)}`).join(", ");
-    return `{ ${inner} }`;
+function toYamlFromPolicy(p: any): string {
+  const rules: string[] = [];
+
+  if (p.packageName) {
+    const extra = p.args && typeof p.args === "object"
+      ? Object.entries(p.args).map(([k, v]) => `    ${k}: ${jsonScalar(v)}`).join("\n")
+      : "";
+    rules.push(
+`  - id: ${p.id}-pkg
+    type: pkg.ensure
+    name: ${p.packageName}
+${extra ? extra + "\n" : ""}`.trimEnd()
+    );
   }
-  return String(v);
+
+  if (typeof p.bash === "string" && p.bash.trim()) {
+    const code = indentBlock(p.bash, 6);
+    rules.push(
+`  - id: ${p.id}-bash
+    type: bash
+    code: |
+${code}`
+    );
+  }
+
+  const header =
+`policy:
+  id: ${p.id}
+  name: ${p.name}
+  version: ${p.version ?? 1}
+
+rules:
+`;
+  return header + (rules.length ? rules.join("\n") + "\n" : "");
+}
+
+function jsonScalar(v: unknown): string {
+  if (typeof v === "string") return JSON.stringify(v);
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return JSON.stringify(v ?? null);
+}
+function indentBlock(text: string, spaces: number): string {
+  const pad = " ".repeat(spaces);
+  return text.replace(/\r?\n/g, "\n" + pad).replace(/^/, pad);
 }
