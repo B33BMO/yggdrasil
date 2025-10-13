@@ -50,7 +50,7 @@ export default function DevicesPage() {
 
   function apiBase() {
     if (typeof window !== "undefined") return `${window.location.origin}/api`;
-    const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
+    const base = process.env.NEXT_PUBLIC_API_URL ?? "http://10.0.203.182:3000";
     return `${base.replace(/\/$/, "")}/api`;
   }
 
