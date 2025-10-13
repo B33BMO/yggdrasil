@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { db } from "../../../_store";
 
-export async function POST(_: Request, { params }: { params: { id: string } }) {
-  const agentId = Number(params.id);
+export async function POST(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> } // 👈 promise
+) {
+  const { id } = await ctx.params;          // 👈 await it
+  const agentId = Number(id);
   const deviceId = db.agentMap.get(agentId);
   if (deviceId) {
     const d = db.devices.find(x => x.id === deviceId);

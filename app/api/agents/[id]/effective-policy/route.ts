@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { db } from "../../../_store";
 
-export async function GET(_: Request, { params }: { params: { id: string } }) {
-  const agentId = Number(params.id);
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> } // 👈 important: params is a Promise
+) {
+  const { id } = await ctx.params;          // 👈 await it
+  const agentId = Number(id);
+
   const deviceId = db.agentMap.get(agentId);
   if (!deviceId) return NextResponse.json({ agent_id: agentId, policies: [] });
 
@@ -65,6 +70,7 @@ function toYamlLines(obj: Record<string, any>): string[] {
   });
   return lines;
 }
+
 function formatYaml(v: any): string {
   if (typeof v === "string") return JSON.stringify(v);
   if (Array.isArray(v)) return `[${v.map(formatYaml).join(", ")}]`;

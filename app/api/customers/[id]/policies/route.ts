@@ -1,12 +1,27 @@
 import { NextResponse } from "next/server";
 import { db } from "../../../_store";
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const { id } = params;
+export async function POST(
+  req: Request,
+  ctx: { params: Promise<{ id: string }> } // 👈 params is a Promise in newer Next
+) {
+  const { id } = await ctx.params;          // 👈 await it
   const { policyId, action } = await req.json();
-  const c = db.customers.find(x => x.id === id);
-  if (!c) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (action === "add" && !c.policyIds.includes(policyId)) c.policyIds.push(policyId);
-  if (action === "remove") c.policyIds = c.policyIds.filter(x => x !== policyId);
-  return NextResponse.json({ ok: true });
+
+  const customer = db.customers.find(c => c.id === id);
+  if (!customer) {
+    return NextResponse.json({ error: "customer not found" }, { status: 404 });
+  }
+
+  const set = new Set(customer.policyIds ?? []);
+  if (action === "add") set.add(policyId);
+  if (action === "remove") set.delete(policyId);
+  customer.policyIds = Array.from(set);
+
+  // Optional: keep existing devices under this customer in sync with customer policy set
+  db.devices
+    .filter(d => d.customerId === id)
+    .forEach(d => { d.policyIds = [...customer.policyIds]; });
+
+  return NextResponse.json({ ok: true, policyIds: customer.policyIds });
 }
