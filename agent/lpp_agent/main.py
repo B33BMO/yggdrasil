@@ -89,14 +89,34 @@ def cmd_run():
             backoff_sleep(attempt, cap=int(cfg.get("max_backoff_sec", 600)))
             continue
 
-def cli():
-    ap = argparse.ArgumentParser(prog="lpp-agent")
-    sub = ap.add_subparsers(dest="cmd")
-    p_enr = sub.add_parser("enroll"); p_enr.add_argument("token"); p_enr.add_argument("api")
-    sub.add_parser("run")
-    args = ap.parse_args()
-    if args.cmd == "enroll": return cmd_enroll(args.token, args.api)
-    return cmd_run()
+def cli(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="lpp-agent")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_enroll = sub.add_parser("enroll", help="Enroll device with token and API")
+    p_enroll.add_argument("token", help="Enrollment token (enr_...)")
+    p_enroll.add_argument("api", help="API base (include /api), e.g. http://host:3000/api")
+
+    p_run = sub.add_parser("run", help="Run agent loop")
+
+    args = parser.parse_args(argv)
+
+    if args.cmd == "enroll":
+        cfg = AgentConfig.load_or_default()
+        cfg.api = args.api
+        enroll_device(cfg, token=args.token)
+        cfg.save()
+        print("[lpp] enrolled")
+        return 0
+
+    if args.cmd == "run":
+        cfg = AgentConfig.load()
+        if not cfg:
+            print("[lpp] not enrolled; run: lpp-agent enroll <TOKEN> <API>", file=sys.stderr)
+            return 2
+        return run_loop(cfg)
+
+    return 0
 
 if __name__ == "__main__":
     raise SystemExit(cli())
