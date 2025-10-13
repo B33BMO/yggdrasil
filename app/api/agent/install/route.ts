@@ -68,11 +68,7 @@ echo "[LPP] Enrolling…"
 
 if [[ "$OS_NAME" == "Linux" ]]; then
   echo "[LPP] Installing systemd unit…"
-<<<<<<< HEAD
   tee /etc/systemd/system/\${SERVICE_NAME}.service >/dev/null <<'UNIT'
-=======
-  tee /etc/systemd/system/${SERVICE_NAME}.service >/dev/null <<'UNIT'
->>>>>>> f114c6a90b0384478e9362af832b4bde5b3eea54
 [Unit]
 Description=Linux Policy Platform Agent
 After=network-online.target
@@ -87,13 +83,8 @@ User=root
 WantedBy=multi-user.target
 UNIT
   systemctl daemon-reload
-<<<<<<< HEAD
   systemctl enable --now \${SERVICE_NAME}
   systemctl status \${SERVICE_NAME} --no-pager -l || true
-=======
-  systemctl enable --now ${SERVICE_NAME}
-  systemctl status ${SERVICE_NAME} --no-pager -l || true
->>>>>>> f114c6a90b0384478e9362af832b4bde5b3eea54
 elif [[ "$OS_NAME" == "Darwin" ]]; then
   echo "[LPP] Installing launchd plist…"
   tee /Library/LaunchDaemons/com.lpp.agent.plist >/dev/null <<'PLIST'
