@@ -1,6 +1,8 @@
+# lpp_agent/main.py
 from __future__ import annotations
 import argparse, logging, time, random
 from typing import Any
+
 from .config import load_conf, save_conf, load_state, save_state, setup_logging
 from .util import distro_id, backoff_sleep
 from .http import Api
@@ -11,14 +13,14 @@ log = logging.getLogger(__name__)
 def _state_key(api: str, agent_id: str) -> str:
     return f"{api}::{agent_id}"
 
-def cmd_enroll(token: str, api: str):
+def cmd_enroll(token: str, api: str) -> int:
     cfg = load_conf()
     setup_logging()
-    cfg["api"] = api
-    a = Api(api)
+    cfg["api"] = api.rstrip("/")
+    a = Api(cfg["api"])
     dist = distro_id()
     res = a.enroll(token=token, hostname=cfg["hostname"], distro=dist)
-    cfg["agent_id"] = res["agent_id"]
+    cfg["agent_id"] = str(res["agent_id"])
     cfg["jwt"] = res.get("device_jwt")
     save_conf(cfg)
     log.info("Enrolled as agent %s", cfg["agent_id"])
@@ -27,10 +29,10 @@ def cmd_enroll(token: str, api: str):
 def run_once(cfg: dict[str, Any]) -> None:
     """
     One iteration:
-      - GET effective policy with If-None-Match
-      - If 304: heartbeat only
-      - If 200: apply YAML policies, post results, heartbeat
-      - Persist new ETag so restarts don't re-apply
+      - GET effective policy using If-None-Match (ETag)
+      - If 304 → heartbeat only
+      - Else apply YAML policies, POST results, heartbeat
+      - Cache ETag so restarts don’t re-apply
     """
     api = cfg["api"]
     agent_id = str(cfg["agent_id"])
@@ -45,9 +47,8 @@ def run_once(cfg: dict[str, Any]) -> None:
     changed, policies, new_etag, rev = a.effective_policy_etag(agent_id, etag)
 
     if not changed:
-        # No policy change → just heartbeat and return quickly
         a.heartbeat(agent_id)
-        log.debug("No policy change (etag=%s) — rev=%s", etag, rev)
+        log.debug("No policy change (etag=%s)", etag)
         return
 
     log.info("Policy change detected (rev=%s). Applying %d policies…", rev, len(policies))
@@ -60,19 +61,18 @@ def run_once(cfg: dict[str, Any]) -> None:
             r["policy_id"] = p.get("id")
         all_results.extend(res)
 
-    # Ingest + heartbeat
     a.post_results({"agent_id": agent_id, "results": all_results, "rev": rev})
     a.heartbeat(agent_id)
 
-    # Persist ETag so we won’t re-apply after restart
+    # persist new etag
     st.setdefault("etags", {})[key] = new_etag
     save_state(st)
     log.info("Applied policies. Stored ETag %s", new_etag)
 
-def cmd_run():
+def cmd_run() -> int:
     cfg = load_conf(); setup_logging()
     if not cfg.get("agent_id"):
-        log.error("Not enrolled. Run: sudo lpp-agent enroll <token> <api-url>")
+        log.error("Not enrolled. Run: sudo lpp-agent enroll <TOKEN> <API-with-/api>")
         return 2
 
     attempt = 0
@@ -81,8 +81,7 @@ def cmd_run():
         try:
             run_once(cfg)
             attempt = 0
-            # tiny jitter to avoid thundering herd
-            time.sleep(base_interval + random.uniform(0, 5))
+            time.sleep(base_interval + random.uniform(0, 5))  # small jitter
         except Exception as e:
             log.error("loop error: %s", e)
             attempt += 1
@@ -93,29 +92,17 @@ def cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lpp-agent")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_enroll = sub.add_parser("enroll", help="Enroll device with token and API")
-    p_enroll.add_argument("token", help="Enrollment token (enr_...)")
-    p_enroll.add_argument("api", help="API base (include /api), e.g. http://host:3000/api")
+    p_enr = sub.add_parser("enroll", help="Enroll device")
+    p_enr.add_argument("token", help="enr_… token")
+    p_enr.add_argument("api", help="API base (include /api), e.g. http://host:3000/api")
 
-    p_run = sub.add_parser("run", help="Run agent loop")
+    sub.add_parser("run", help="Run agent loop")
 
     args = parser.parse_args(argv)
-
     if args.cmd == "enroll":
-        cfg = AgentConfig.load_or_default()
-        cfg.api = args.api
-        enroll_device(cfg, token=args.token)
-        cfg.save()
-        print("[lpp] enrolled")
-        return 0
-
+        return cmd_enroll(args.token, args.api)
     if args.cmd == "run":
-        cfg = AgentConfig.load()
-        if not cfg:
-            print("[lpp] not enrolled; run: lpp-agent enroll <TOKEN> <API>", file=sys.stderr)
-            return 2
-        return run_loop(cfg)
-
+        return cmd_run()
     return 0
 
 if __name__ == "__main__":
