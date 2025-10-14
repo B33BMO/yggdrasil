@@ -1,15 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "lpp-agent"
 version = "0.2.0"
-requires-python = ">=3.11"
+description = "Linux Policy Platform Agent"
+requires-python = ">=3.10"
 dependencies = [
-  "requests>=2.31.0
-  tomli; python_version < "3.11"
-  # add your deps here
+  "requests>=2.31.0",
+  "PyYAML>=6.0",
+  'tomli; python_version < "3.11"'
 ]
 
 [project.scripts]
-lpp-agent = "lpp_agent.main:cli"   # 👈 stable console entrypoint
+lpp-agent = "lpp_agent.main:cli"
 
 [tool.setuptools.packages.find]
 where = ["."]
